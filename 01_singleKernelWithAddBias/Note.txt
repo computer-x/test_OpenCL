@@ -1,0 +1,5 @@
+1、cl文件中的参数和变量只有int类型，并没有cl_int类型。（float等类型同之）
+
+2、clSetKernelArg函数传递的是地址，cl函数中获得的是该地址中的值：
+	例如，clSetKernelArg传入的是&dsrc（二重指针），kernel获得的是dsrc（指针）；
+	     clSetKernelArg传入的是&bias（指针），kernel获得的是bias（值）。
