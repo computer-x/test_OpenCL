@@ -7,6 +7,8 @@
 #include <string.h>
 #include "OpenCL/opencl.h"
 
+#define KERNEL_NUM 2
+
 typedef struct OCL_ctx {
     cl_uint num_platforms;
     cl_platform_id *platforms;
@@ -16,7 +18,7 @@ typedef struct OCL_ctx {
     cl_context context;
     cl_command_queue queue;
     cl_program program;
-    cl_kernel kernel;
+    cl_kernel kernel[KERNEL_NUM];
     cl_mem dsrc, ddst;
 } OCL_ctx;
 
@@ -92,15 +94,16 @@ int create_device(OCL_ctx *ctx)
         return -1;
     }
     
-    //第三个参数指的是要出初始化的设备的总数量
+    //标准写法，第三个参数指的是要出初始化的设备的总数量
     err = clGetDeviceIDs(ctx->platforms[0], CL_DEVICE_TYPE_GPU, ctx->num_devices, ctx->devices, NULL);
-    //err = clGetDeviceIDs(ctx->platforms[0], CL_DEVICE_TYPE_GPU, 1, ctx->devices, NULL);
+    //按理说我用哪个设备就初始化那个就行了，但是无论我初始化&ctx->devices[0]还是初始化&ctx->devices[1]，最后查询出来都是Intel UDH Graphics，原因尚不明
+    //err = clGetDeviceIDs(ctx->platforms[0], CL_DEVICE_TYPE_GPU, 1, &ctx->devices[1], NULL);
+    
     if(err){
         printf("get device id failed!\n");
         return -1;
     }
 
-    
     char device_name[100];
     err = clGetDeviceInfo(ctx->devices[0], CL_DEVICE_NAME, 100, device_name, NULL);
     if(err){
@@ -123,7 +126,7 @@ int create_kernel(OCL_ctx *ctx)
 {
     cl_int err;
     
-    ctx->context = clCreateContext(NULL, 1, &ctx->devices[1], NULL, NULL, &err);
+    ctx->context = clCreateContext(NULL, 1, &ctx->devices[1], NULL, NULL, &err); //创建上下文时选的设备 需要与 创建上下文时所选的设备 一致
     if(err){
         printf("create context failed!\n");
         return -1;
@@ -153,8 +156,8 @@ int create_kernel(OCL_ctx *ctx)
     }
     //printf("kernel(length:%d):\n%s\n", length, sourcefile);
 
-    //ctx->program = clCreateProgramWithSource(ctx->context, 1, (const char **)&sourcefile, NULL, &err);
-    ctx->program = clCreateProgramWithSource(ctx->context, 1, (const char **)&sourcefile, &length, &err);
+    ctx->program = clCreateProgramWithSource(ctx->context, 1, (const char **)&sourcefile, NULL, &err); //这里要不要这个长度信息无所谓
+    //ctx->program = clCreateProgramWithSource(ctx->context, 1, (const char **)&sourcefile, &length, &err);
     if(err){
         printf("create program failed!\n");
         return -1;
@@ -166,7 +169,7 @@ int create_kernel(OCL_ctx *ctx)
         return -1;
     }
     
-    ctx->kernel = clCreateKernel(ctx->program, "add_bias", &err);
+    ctx->kernel[0] = clCreateKernel(ctx->program, "add_bias", &err);
     if(err){
         printf("create kernel failed!\n");
         return -1;
@@ -182,7 +185,7 @@ int ctx_free(OCL_ctx *ctx)
     err = clReleaseMemObject(ctx->ddst);
     err |= clReleaseMemObject(ctx->dsrc);
     
-    err |= clReleaseKernel(ctx->kernel);
+    err |= clReleaseKernel(ctx->kernel[0]);
     err |= clReleaseProgram(ctx->program);
     err |= clReleaseCommandQueue(ctx->queue);
     err |= clReleaseContext(ctx->context);
@@ -208,9 +211,9 @@ int main()
     ctx->ddst = clCreateBuffer(ctx->context, CL_MEM_WRITE_ONLY, data_count * sizeof(float), NULL, NULL);
     cl_int dbias = 10; //这种形式的参数值必须在clSetKernelBuffer之前确定
 
-    err = clSetKernelArg(ctx->kernel, 0, sizeof(cl_mem), &ctx->dsrc);
-    err |= clSetKernelArg(ctx->kernel, 1, sizeof(cl_mem), &ctx->ddst);
-    err |= clSetKernelArg(ctx->kernel, 2, sizeof(cl_mem), &dbias);
+    err = clSetKernelArg(ctx->kernel[0], 0, sizeof(cl_mem), &ctx->dsrc);
+    err |= clSetKernelArg(ctx->kernel[0], 1, sizeof(cl_mem), &ctx->ddst);
+    err |= clSetKernelArg(ctx->kernel[0], 2, sizeof(cl_mem), &dbias);
     
     if(err){
         printf("set kernel arg failed!\n");
@@ -226,7 +229,7 @@ int main()
     
     size_t global[1] = { 16 };
     size_t local[1] = { 1 };
-    err = clEnqueueNDRangeKernel(ctx->queue, ctx->kernel, 1, NULL, global, local, 0, NULL, NULL);
+    err = clEnqueueNDRangeKernel(ctx->queue, ctx->kernel[0], 1, NULL, global, local, 0, NULL, NULL);
     
     err = clEnqueueReadBuffer(ctx->queue, ctx->ddst, CL_TRUE, 0, 16 * sizeof(int), hdst, 0, NULL, NULL);
     
